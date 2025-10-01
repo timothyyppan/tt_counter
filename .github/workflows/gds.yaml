@@ -1,55 +1,62 @@
 name: gds
 
 on:
-  push:
   workflow_dispatch:
+  push:
+    paths:
+      - "src/**"
+      - "info.yaml"
 
 jobs:
-  gds:
-    runs-on: ubuntu-24.04
+  harden:
+    runs-on: ubuntu-latest
     steps:
-      - name: checkout repo
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
+      - uses: actions/checkout@v4
 
-      - name: Build GDS
-        uses: TinyTapeout/tt-gds-action@ttsky25a
+      # Run TinyTapeout OpenLane flow (Sky130)
+      - name: Harden design to GDS
+        uses: TinyTapeout/tt-gds-action@v1
         with:
-          pdk: sky130
-          tools-ref: ttsky25a
+          top_module: tt_um_counter
 
-  precheck:
-    needs: gds
-    runs-on: ubuntu-24.04
+      # Upload results so other jobs (and you) can fetch them
+      - name: Upload OpenLane artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tt-openlane-artifacts
+          path: runs/**/results/**
+
+  gls:
+    needs: harden
+    runs-on: ubuntu-latest
     steps:
-      - name: Run Tiny Tapeout Precheck
-        uses: TinyTapeout/tt-gds-action/precheck@ttsky25a
-        with:
-          pdk: sky130
-          tools-ref: ttsky25a
+      - uses: actions/checkout@v4
 
-  gl_test:
-    needs: gds
-    runs-on: ubuntu-24.04
-    steps:
-      - name: checkout repo
-        uses: actions/checkout@v4
+      # Get the post-layout netlist from the previous job
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
         with:
-          submodules: recursive
+          name: tt-openlane-artifacts
+          path: artifacts
 
-      - name: GL test
-        uses: TinyTapeout/tt-gds-action/gl_test@ttsky25a
-        with:
-          pdk: sky130
+      # Find the gate-level netlist and drop it where test/Makefile expects it
+      - name: Place gate_level_netlist.v
+        run: |
+          GL=$(find artifacts -name "tt_um_counter.gl.v" -print -quit)
+          if [ -z "$GL" ]; then
+            echo "ERROR: gate-level netlist not found in artifacts"
+            exit 1
+          fi
+          cp "$GL" test/gate_level_netlist.v
 
-  viewer:
-    needs: gds
-    runs-on: ubuntu-24.04
-    permissions:
-      pages: write      # to deploy to Pages
-      id-token: write   # to verify the deployment originates from an appropriate source
-    steps:
-      - uses: TinyTapeout/tt-gds-action/viewer@ttsky25a
-        with:
-          pdk: sky130
+      # Run GLS with cocotb using your existing test/Makefile
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iverilog python3 python3-pip
+          pip3 install -r test/requirements.txt
+      - name: Gate-level sim (functional)
+        working-directory: test
+        env:
+          GATES: "yes"
+        run: make
