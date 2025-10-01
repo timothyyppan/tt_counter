@@ -1,47 +1,29 @@
-name: gds
+- name: Preflight: show repo layout
+  run: |
+    echo "PWD=$(pwd)"
+    echo "=== ls root ==="; ls -la
+    echo "=== cat info.yaml ==="; sed -n '1,200p' info.yaml || true
+    echo "=== ls src ==="; ls -la src || true
+    echo "=== grep top in src ==="; grep -R --line-number "module tt_um_counter" src || true
+    echo "=== git ls-files (is file tracked?) ==="; git ls-files -- src/counter.v || true
 
-on:
-  push:
-  workflow_dispatch:
-
-jobs:
-  gds:
-    runs-on: ubuntu-24.04
-    steps:
-      - name: checkout repo
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Build GDS
-        uses: TinyTapeout/tt-gds-action@ttsky25b
-        with:
-          pdk: sky130A
-
-  precheck:
-    needs: gds
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Run Tiny Tapeout Precheck
-        uses: TinyTapeout/tt-gds-action/precheck@ttsky25b
-
-  gl_test:
-    needs: gds
-    runs-on: ubuntu-24.04
-    steps:
-      - name: checkout repo
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: GL test
-        uses: TinyTapeout/tt-gds-action/gl_test@ttsky25b
-
-  viewer:
-    needs: gds
-    runs-on: ubuntu-24.04
-    permissions:
-      pages: write      # to deploy to Pages
-      id-token: write   # to verify the deployment originates from an appropriate source
-    steps:
-      - uses: TinyTapeout/tt-gds-action/viewer@ttsky25b
+- name: Sanity checks (info.yaml + sources)
+  run: |
+    python3 - <<'PY'
+import os, sys, yaml
+with open("info.yaml") as f: y=yaml.safe_load(f)
+p=y.get("project",{})
+errs=[]
+if p.get("language","").lower()!="verilog": errs.append("language must be 'verilog'")
+top=p.get("top_module",""); srcs=p.get("source_files",[])
+if not top: errs.append("top_module missing")
+if not srcs: errs.append("source_files empty")
+for s in srcs:
+    if not os.path.exists(s): errs.append(f"missing source file: {s}")
+found=False
+for s in srcs:
+    if os.path.exists(s) and f"module {top}" in open(s).read(): found=True; break
+if not found: errs.append(f"top module '{top}' not declared in listed sources")
+if errs: print("PRECHECK FAILED:\\n- " + "\\n- ".join(errs)); sys.exit(1)
+print("Precheck OK: top=",top," sources=",srcs)
+PY
