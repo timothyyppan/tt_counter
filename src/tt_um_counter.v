@@ -1,3 +1,10 @@
+/*
+ * Copyright (c) 2025 Timothy Pan
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+`default_nettype none
+
 module tt_um_timothy_counter(
   input  wire [7:0] ui_in,
   output wire [7:0] uo_out,
