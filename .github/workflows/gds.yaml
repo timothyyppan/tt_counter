@@ -1,116 +1,47 @@
 name: gds
 
 on:
-  workflow_dispatch:
   push:
-    paths:
-      - "src/**"
-      - "info.yaml"
-      - ".github/workflows/gds.yml"
+  workflow_dispatch:
 
 jobs:
-  harden:
-    runs-on: ubuntu-latest
+  gds:
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - name: checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-      # --- Quick visibility so we see exactly what the runner sees ---
-      - name: Preflight: show repo layout
-        run: |
-          echo "PWD=$(pwd)"
-          echo "=== ls root ==="; ls -la
-          echo "=== info.yaml ==="; sed -n '1,200p' info.yaml || true
-          echo "=== ls src ==="; ls -la src || true
-          echo "=== grep top in src ==="; grep -R --line-number "module tt_um_counter" src || true
-          echo "=== git ls-files ==="; git ls-files -- src/counter.v || true
-
-      # --- Sanity check: info.yaml + sources exist & top declared ---
-      - name: Sanity checks (info.yaml + sources)
-        run: |
-          python3 - <<'PY'
-import os, sys, yaml
-with open("info.yaml") as f: y=yaml.safe_load(f)
-p=y.get("project",{})
-errs=[]
-if p.get("language","").lower()!="verilog": errs.append("language must be 'verilog'")
-top=p.get("top_module",""); srcs=p.get("source_files",[])
-if not top: errs.append("top_module missing")
-if not srcs: errs.append("source_files empty")
-for s in srcs:
-    if not os.path.exists(s): errs.append(f"missing source file: {s}")
-found=False
-for s in srcs:
-    if os.path.exists(s) and f"module {top}" in open(s).read():
-        found=True; break
-if not found: errs.append(f"top module '{top}' not declared in listed sources")
-if errs:
-    print("PRECHECK FAILED:\n- " + "\n- ".join(errs)); sys.exit(1)
-print("Precheck OK:", "top=",top, "sources=",srcs)
-PY
-
-      # --- Optional: quick RTL elaborate to catch naming typos early ---
-      - name: Quick iverilog compile (RTL sanity)
-        run: |
-          sudo apt-get update && sudo apt-get install -y iverilog
-          iverilog -g2012 -s tt_um_counter -o /tmp/elab $(printf " %s" src/*.v)
-
-      # --- Run TinyTapeout hardening (Sky130) ---
-      - name: Harden design to GDS
+      - name: Build GDS
         uses: TinyTapeout/tt-gds-action@ttsky25b
         with:
-          top_module: tt_um_counter
+          pdk: sky130A
 
-      # --- Upload OpenLane result artifacts for inspection / GLS ---
-      - name: Upload OpenLane artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: tt-openlane-artifacts
-          path: runs/**/results/**
-
-      # Always upload logs if present (helps debug failures)
-      - name: Upload OpenLane logs (always)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: tt-openlane-logs
-          path: |
-            runs/**/logs/**
-            runs/**/reports/**
-            runs/**/results/**
-          if-no-files-found: ignore
-
-  gls:
-    needs: harden
-    runs-on: ubuntu-latest
+  precheck:
+    needs: gds
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - name: Run Tiny Tapeout Precheck
+        uses: TinyTapeout/tt-gds-action/precheck@ttsky25b
 
-      - name: Download OpenLane artifacts
-        uses: actions/download-artifact@v4
+  gl_test:
+    needs: gds
+    runs-on: ubuntu-24.04
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v4
         with:
-          name: tt-openlane-artifacts
-          path: artifacts
+          submodules: recursive
 
-      # Copy the post-layout netlist where your test/Makefile expects it
-      - name: Place gate_level_netlist.v
-        run: |
-          GL=$(find artifacts -name "tt_um_counter.gl.v" -print -quit)
-          if [ -z "$GL" ]; then
-            echo "ERROR: gate-level netlist not found in artifacts"; exit 1
-          fi
-          mkdir -p test
-          cp "$GL" test/gate_level_netlist.v
-          ls -la test
+      - name: GL test
+        uses: TinyTapeout/tt-gds-action/gl_test@ttsky25b
 
-      - name: Install sim deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y iverilog python3 python3-pip
-          pip3 install -r test/requirements.txt
-
-      # Run your existing cocotb test in gate-level mode
-      - name: Gate-level simulation (GATES=yes)
-        working-directory: test
-        env:
-          GATES: "yes"
-        run: make
+  viewer:
+    needs: gds
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write      # to deploy to Pages
+      id-token: write   # to verify the deployment originates from an appropriate source
+    steps:
+      - uses: TinyTapeout/tt-gds-action/viewer@ttsky25b
