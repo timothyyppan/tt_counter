@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+`default_nettype none
+
 module counter(
   input  wire       clk,
   input  wire       rst_n,     // async, active-low
