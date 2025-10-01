@@ -8,7 +8,7 @@ module counter(
   input  wire       rst_n,     // async, active-low
   input  wire       load,      // sync load
   input  wire       en,        // count enable
-  input  wire       oe,        // tri-state enable (for q_z)
+  input  wire       oe,        // tri-state enable
   input  wire [7:0] load_data,
   output wire [7:0] q,
   output wire [7:0] q_z
