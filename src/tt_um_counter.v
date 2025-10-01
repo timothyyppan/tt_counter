@@ -5,7 +5,7 @@
 
 `default_nettype none
 
-module tt_um_timothy_counter(
+module tt_um_counter(
   input  wire [7:0] ui_in,
   output wire [7:0] uo_out,
   input  wire [7:0] uio_in,
@@ -21,7 +21,7 @@ module tt_um_timothy_counter(
 
   wire [7:0] q, q_z;
 
-  counter8 u_cnt(
+  counter u_cnt(
     .clk(clk), .rst_n(rst_n),
     .load(load), .en(en), .oe(oe),
     .load_data(uio_in),
